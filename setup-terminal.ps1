@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Windows 终端现代化一键配置脚本（无需管理员权限）
 .DESCRIPTION
