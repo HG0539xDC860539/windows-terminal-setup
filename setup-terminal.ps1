@@ -272,15 +272,26 @@ if ($Restore) {
     }
 
     if ($uninstallChoice -eq "1" -or $uninstallChoice -eq "2") {
-        # Scoop 卸载
+        # 临时关闭 Stop，防止外部命令的意外错误终止整个脚本
+        $savedEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+
+        # Scoop 卸载（先用 scoop list 预检，避免对未安装工具执行卸载）
         if (Test-Command scoop) {
             Write-Step "通过 Scoop 卸载工具..."
+            $scoopInstalled = @()
+            scoop list 2>$null | ForEach-Object {
+                if ($_ -match '^\s+(\S+)') { $scoopInstalled += $Matches[1] }
+            }
             $uninstalled = 0
             foreach ($tool in $allScoopTools) {
+                if ($scoopInstalled -notcontains $tool) { continue }
                 scoop uninstall $tool 2>$null | Out-Null
                 if ($LASTEXITCODE -eq 0) {
                     Write-Ok "$tool (scoop)"
                     $uninstalled++
+                } else {
+                    Write-Warn "$tool 卸载失败，跳过"
                 }
             }
             if ($uninstalled -eq 0) { Write-Warn "没有通过 Scoop 安装的工具" }
@@ -299,6 +310,8 @@ if ($Restore) {
             }
             if ($uninstalled -eq 0) { Write-Warn "没有通过 winget 安装的工具" }
         }
+
+        $ErrorActionPreference = $savedEAP
 
         # 清理 zoxide 数据
         $zoxideDataDir = Join-Path $env:APPDATA "zoxide"
