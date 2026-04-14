@@ -455,9 +455,16 @@ foreach ($cat in $script:toolCategories.GetEnumerator()) {
     }
 }
 
-# 检测已安装状态
+# 检测已安装状态（双重检测：命令行 + 包管理器）
 foreach ($t in $toolList) {
     $t.Installed = (Test-Command $t.TestName)
+    # 兜底检测：PATH 未刷新时 Test-Command 可能漏检
+    if (-not $t.Installed -and (Test-Command scoop)) {
+        $scoopList = scoop list $t.ScoopName 2>$null | Out-String
+        if ($scoopList -match $t.ScoopName -and $scoopList -notmatch "not installed") {
+            $t.Installed = $true
+        }
+    }
 }
 
 # 交互式选择工具（Force 模式跳过选择界面）
