@@ -277,9 +277,8 @@ if ($Restore) {
             Write-Step "通过 Scoop 卸载工具..."
             $uninstalled = 0
             foreach ($tool in $allScoopTools) {
-                $out = scoop uninstall $tool 2>&1
-                $text = ($out | Out-String)
-                if ($text -notmatch "ERROR" -and $text -notmatch "not installed") {
+                scoop uninstall $tool 2>$null | Out-Null
+                if ($LASTEXITCODE -eq 0) {
                     Write-Ok "$tool (scoop)"
                     $uninstalled++
                 }
@@ -292,12 +291,10 @@ if ($Restore) {
             Write-Step "通过 winget 卸载工具..."
             $uninstalled = 0
             foreach ($tool in $allWingetTools) {
-                try {
-                    winget uninstall $tool.Id --exact --accept-source-agreements --silent 2>$null
+                winget uninstall $tool.Id --exact --accept-source-agreements --silent 2>$null | Out-Null
+                if ($LASTEXITCODE -eq 0) {
                     Write-Ok "$($tool.Name) (winget)"
                     $uninstalled++
-                } catch {
-                    # 工具可能不是通过 winget 安装的，忽略
                 }
             }
             if ($uninstalled -eq 0) { Write-Warn "没有通过 winget 安装的工具" }
