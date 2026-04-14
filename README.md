@@ -51,7 +51,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 输入 `Y` 确认。只需执行一次，永久生效。
 
-> **`RemoteSigned` 不会让远端脚本随意执行。** 它的含义是：
+> **`-ExecutionPolicy RemoteSigned` 不会让远端脚本随意执行。** 它的含义是：
 > - 本地脚本（你自己写的、U 盘拷过来的）→ 直接运行，不拦截
 > - 从网络下载的脚本（浏览器下载的、带 Windows 安全标记的）→ 必须有受信任的数字签名才能运行
 >
