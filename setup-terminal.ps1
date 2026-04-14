@@ -272,16 +272,19 @@ if ($Restore) {
     }
 
     if ($uninstallChoice -eq "1" -or $uninstallChoice -eq "2") {
-        # 临时关闭 Stop，防止外部命令的意外错误终止整个脚本
+        # 临时设为 SilentlyContinue，防止外部命令（如 7zip 的 reg import）的 stderr 输出干扰
         $savedEAP = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
+        $ErrorActionPreference = "SilentlyContinue"
 
         # Scoop 卸载（先用 scoop list 预检，避免对未安装工具执行卸载）
         if (Test-Command scoop) {
             Write-Step "通过 Scoop 卸载工具..."
             $scoopInstalled = @()
+            # scoop list 在管道中输出 PSCustomObject，需取 .Name 属性
             scoop list 2>$null | ForEach-Object {
-                if ($_ -match '^\s+(\S+)') { $scoopInstalled += $Matches[1] }
+                if ($_ -is [PSCustomObject] -and $_.Name) {
+                    $scoopInstalled += $_.Name
+                }
             }
             $uninstalled = 0
             foreach ($tool in $allScoopTools) {
