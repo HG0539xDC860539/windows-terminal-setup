@@ -2,10 +2,11 @@
 .SYNOPSIS
     Windows 终端现代化一键配置脚本（无需管理员权限）
 .DESCRIPTION
-    基于 draft.md 优化方案，自动安装 Nerd Font、17 个 CLI 工具、
+    自动安装 Nerd Font、18 个 CLI 工具（可交互选择）、
     配置 Starship 主题和 PowerShell Profile。
     支持 Scoop 或 winget，全程普通用户权限。
     字体通过 per-user 方式安装，不需要管理员。
+    已安装的工具自动跳过，支持交互式选择安装范围。
     使用 -Restore 可恢复为脚本配置前的默认状态。
 .EXAMPLE
     .\setup-terminal.ps1
@@ -48,6 +49,12 @@ function Test-FontInstalled($name) {
         return [bool]$found
     }
     return $false
+}
+
+# 检测 winget 是否已安装某个包
+function Test-WingetInstalled($id) {
+    $output = winget list --exact --id $id --accept-source-agreements 2>$null | Out-String
+    return ($output -match [regex]::Escape($id) -and $output -notmatch "No installed package")
 }
 
 # Per-user 字体安装（不需要管理员）
@@ -120,6 +127,43 @@ function Add-ProfileConfig($configLines) {
     } else {
         Write-Ok "Profile 无需更新（配置已存在）"
     }
+}
+
+# ── CLI 工具定义（安装/恢复共用） ──────────────────────
+# WingetId: winget 包 ID（空字符串 = 无 winget 包，需 scoop 补装）
+# ScoopName: scoop 包名（用于显示和卸载）
+# ScoopInstallArg: scoop install 的参数（部分工具需要 bucket 前缀）
+# TestName: 实际可执行文件名（用于检测是否已安装）
+# Desc: 工具描述
+$script:toolCategories = [ordered]@{
+    "外观与交互" = @(
+        @{ WingetId="Starship.Starship";       ScoopName="starship";  ScoopInstallArg="starship";          TestName="starship";  Desc="命令行提示符" }
+        @{ WingetId="lsd-rs.lsd";              ScoopName="lsd";       ScoopInstallArg="lsd";               TestName="lsd";       Desc="彩色文件列表" }
+    )
+    "导航与搜索" = @(
+        @{ WingetId="ajeetdsouza.zoxide";      ScoopName="zoxide";    ScoopInstallArg="zoxide";            TestName="zoxide";    Desc="智能目录跳转" }
+        @{ WingetId="junegunn.fzf";            ScoopName="fzf";       ScoopInstallArg="fzf";               TestName="fzf";       Desc="模糊搜索神器" }
+        @{ WingetId="sharkdp.fd";              ScoopName="fd";        ScoopInstallArg="fd";                TestName="fd";        Desc="快速文件查找" }
+    )
+    "查看与阅读" = @(
+        @{ WingetId="sharkdp.bat";             ScoopName="bat";       ScoopInstallArg="bat";               TestName="bat";       Desc="语法高亮的 cat" }
+        @{ WingetId="BurntSushi.ripgrep.MSVC"; ScoopName="ripgrep";   ScoopInstallArg="ripgrep";           TestName="rg";        Desc="超高速文本搜索" }
+        @{ WingetId="jqlang.jq";               ScoopName="jq";        ScoopInstallArg="jq";                TestName="jq";        Desc="JSON 处理器" }
+        @{ WingetId="josephburnett.jd";        ScoopName="jd";        ScoopInstallArg="extras/jd";         TestName="jd";        Desc="JSON Diff" }
+        @{ WingetId="tldr-pages.tlrc";         ScoopName="tldr";      ScoopInstallArg="tldr";              TestName="tldr";      Desc="简化版命令手册" }
+        @{ WingetId="sxyazi.yazi";             ScoopName="yazi";      ScoopInstallArg="yazi";              TestName="yazi";      Desc="终端文件管理器" }
+    )
+    "处理与转换" = @(
+        @{ WingetId="Gyan.FFmpeg";             ScoopName="ffmpeg";    ScoopInstallArg="ffmpeg";            TestName="ffmpeg";    Desc="音视频处理" }
+        @{ WingetId="ImageMagick.ImageMagick"; ScoopName="imagemagick"; ScoopInstallArg="imagemagick";     TestName="magick";    Desc="图片处理" }
+        @{ WingetId="oschwartz10612.Poppler";  ScoopName="poppler";   ScoopInstallArg="poppler";           TestName="pdftotext"; Desc="PDF 工具集" }
+        @{ WingetId="";                        ScoopName="resvg";     ScoopInstallArg="resvg";             TestName="resvg";     Desc="SVG 渲染" }
+        @{ WingetId="7zip.7zip";               ScoopName="7zip";      ScoopInstallArg="7zip";              TestName="7z";        Desc="压缩解压" }
+    )
+    "基础设施" = @(
+        @{ WingetId="uutils.coreutils";        ScoopName="coreutils"; ScoopInstallArg="coreutils";         TestName="coreutils"; Desc="GNU 核心工具" }
+        @{ WingetId="JesseDuffield.lazygit";   ScoopName="lazygit";   ScoopInstallArg="extras/lazygit";    TestName="lazygit";   Desc="Git 可视化界面" }
+    )
 }
 
 # ── 恢复模式 ──────────────────────────────────────────
@@ -215,28 +259,18 @@ if ($Restore) {
     $uninstallChoice = if ($Force) { "1" } else { (Read-Host "  请输入 1-3 [默认 3]") }
     if (-not $uninstallChoice) { $uninstallChoice = "3" }
 
-    $allScoopTools = @(
-        "starship", "lsd", "zoxide", "fzf", "fd",
-        "bat", "ripgrep", "jq", "jd", "tldr", "yazi",
-        "ffmpeg", "imagemagick", "poppler", "resvg", "7zip",
-        "coreutils", "lazygit"
-    )
-    $allWingetTools = @(
-        @{ Id = "Starship.Starship";            Name = "starship" }
-        @{ Id = "sxyazi.yazi";                  Name = "yazi" }
-        @{ Id = "Gyan.FFmpeg";                  Name = "ffmpeg" }
-        @{ Id = "7zip.7zip";                    Name = "7zip" }
-        @{ Id = "jqlang.jq";                    Name = "jq" }
-        @{ Id = "oschwartz10612.Poppler";       Name = "poppler" }
-        @{ Id = "sharkdp.fd";                   Name = "fd" }
-        @{ Id = "BurntSushi.ripgrep.MSVC";      Name = "ripgrep" }
-        @{ Id = "junegunn.fzf";                 Name = "fzf" }
-        @{ Id = "ajeetdsouza.zoxide";           Name = "zoxide" }
-        @{ Id = "ImageMagick.ImageMagick";      Name = "imagemagick" }
-        @{ Id = "sharkdp.bat";                  Name = "bat" }
-        @{ Id = "tldr-pages.tlrc";              Name = "tldr" }
-        @{ Id = "uutils.coreutils";             Name = "coreutils" }
-    )
+    # 从统一定义推导工具列表
+    $allScoopTools = @()
+    $allWingetTools = @()
+    foreach ($cat in $script:toolCategories.Values) {
+        foreach ($tool in $cat) {
+            $allScoopTools += $tool.ScoopName
+            if ($tool.WingetId) {
+                $allWingetTools += @{ Id = $tool.WingetId; Name = $tool.ScoopName }
+            }
+        }
+    }
+
     if ($uninstallChoice -eq "1" -or $uninstallChoice -eq "2") {
         # Scoop 卸载
         if (Test-Command scoop) {
@@ -396,102 +430,173 @@ if (Test-FontInstalled "0xProto") {
     }
 }
 
-# ── 第二步：安装 CLI 工具 ──────────────────────────────
-Write-Title "第二步：安装 CLI 工具全家桶（17 个）"
+# ── 第二步：选择并安装 CLI 工具 ────────────────────────
+Write-Title "第二步：选择并安装 CLI 工具"
 
-$successCount = 0
-$failCount = 0
-$failedTools = [System.Collections.Generic.List[string]]::new()
+Update-SessionPath
 
-if ($pm -eq "scoop") {
-    # 按类别批量安装（scoop 支持一条命令装多个包）
-    $groups = [ordered]@{
-        "外观与交互" = @("starship", "lsd")
-        "导航与搜索" = @("zoxide", "fzf", "fd")
-        "查看与阅读" = @("bat", "ripgrep", "jq", "jd", "tldr", "yazi")
-        "处理与转换" = @("ffmpeg", "imagemagick", "poppler", "resvg", "7zip")
-        "基础设施"   = @("coreutils", "lazygit")
+# 构建扁平工具列表（带编号和安装状态）
+$toolList = [System.Collections.ArrayList]::new()
+$idx = 0
+foreach ($cat in $script:toolCategories.GetEnumerator()) {
+    foreach ($tool in $cat.Value) {
+        $idx++
+        [void]$toolList.Add([PSCustomObject]@{
+            Index     = $idx
+            Category  = $cat.Key
+            WingetId  = $tool.WingetId
+            ScoopName = $tool.ScoopName
+            ScoopInstallArg = $tool.ScoopInstallArg
+            TestName  = $tool.TestName
+            Desc      = $tool.Desc
+            Selected  = $true
+            Installed = $false
+        })
     }
+}
 
-    foreach ($entry in $groups.GetEnumerator()) {
-        Write-Step "[$($entry.Key)] $($entry.Value -join ', ')"
-        # 逐个安装，收集结果（scoop 批量安装时错误信息混在一起不好解析）
-        foreach ($tool in $entry.Value) {
-            $out = scoop install $tool 2>&1
-            $text = ($out | Out-String)
-            if ($text -match "ERROR") {
-                Write-Fail "$tool"
-                $failCount++
-                $failedTools.Add($tool)
-            } else {
-                Write-Ok "$tool"
-                $successCount++
-            }
+# 检测已安装状态
+foreach ($t in $toolList) {
+    $t.Installed = (Test-Command $t.TestName)
+}
+
+# 交互式选择工具（Force 模式跳过选择界面）
+if (-not $Force) {
+    Write-Host "`n  可安装的 CLI 工具（共 $($toolList.Count) 个）："
+    $prevCat = ""
+    foreach ($t in $toolList) {
+        if ($t.Category -ne $prevCat) {
+            Write-Host "`n  $($t.Category)：" -ForegroundColor Cyan
+            $prevCat = $t.Category
+        }
+        if ($t.Installed) {
+            Write-Host ("    {0,3}. {1,-13} {2}  (已安装)" -f $t.Index, $t.ScoopName, $t.Desc) -ForegroundColor DarkGray
+        } else {
+            Write-Host ("    {0,3}. {1,-13} {2}" -f $t.Index, $t.ScoopName, $t.Desc) -ForegroundColor White
         }
     }
-} else {
-    # winget：逐个安装
-    $wingetTools = @(
-        @{ Id = "Starship.Starship";            Name = "starship" }
-        @{ Id = "sxyazi.yazi";                  Name = "yazi" }
-        @{ Id = "Gyan.FFmpeg";                  Name = "ffmpeg" }
-        @{ Id = "7zip.7zip";                    Name = "7zip" }
-        @{ Id = "jqlang.jq";                    Name = "jq" }
-        @{ Id = "oschwartz10612.Poppler";       Name = "poppler" }
-        @{ Id = "sharkdp.fd";                   Name = "fd" }
-        @{ Id = "BurntSushi.ripgrep.MSVC";      Name = "ripgrep" }
-        @{ Id = "junegunn.fzf";                 Name = "fzf" }
-        @{ Id = "ajeetdsouza.zoxide";           Name = "zoxide" }
-        @{ Id = "ImageMagick.ImageMagick";      Name = "imagemagick" }
-        @{ Id = "sharkdp.bat";                  Name = "bat" }
-        @{ Id = "tldr-pages.tlrc";              Name = "tldr" }
-        @{ Id = "uutils.coreutils";             Name = "coreutils" }
-    )
-
-    foreach ($tool in $wingetTools) {
-        Write-Step "安装 $($tool.Name)..."
-        try {
-            winget install $tool.Id --exact --accept-source-agreements --accept-package-agreements --silent 2>$null
-            Write-Ok "$($tool.Name)"
-            $successCount++
-        } catch {
-            Write-Fail "$($tool.Name)"
-            $failCount++
-            $failedTools.Add($tool.Name)
-        }
-    }
-
-    # winget 缺失的工具 → 用 scoop 补装
-    $wingetMissing = @("lsd", "resvg", "lazygit", "jd")
     Write-Host ""
-    Write-Warn "winget 缺少：$($wingetMissing -join ', ')"
-    $answer = if ($Force) { "y" } else { (Read-Host "  用 Scoop 补装？[Y/n]").ToLower() }
-    if ($answer -ne "n") {
-        if (-not (Test-Command scoop)) {
-            Write-Step "安装 Scoop 以补装缺失工具..."
-            Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-            Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
-            Update-SessionPath
-        }
-        foreach ($tool in $wingetMissing) {
-            $out = scoop install $tool 2>&1
-            $text = ($out | Out-String)
-            if ($text -match "ERROR") {
-                Write-Fail "$tool"
-                $failCount++
-                $failedTools.Add($tool)
-            } else {
-                Write-Ok "$tool (scoop)"
-                $successCount++
+    Write-Host "  输入要跳过的编号（空格分隔），回车 = 安装全部未安装的工具" -ForegroundColor DarkYellow
+    $skipInput = (Read-Host "  跳过").Trim()
+    if ($skipInput) {
+        $skipNums = $skipInput -split '\s+' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ }
+        foreach ($n in $skipNums) {
+            if ($n -ge 1 -and $n -le $toolList.Count) {
+                $toolList[$n - 1].Selected = $false
             }
         }
     }
 }
 
+# 分类：需要安装 / 已安装 / 用户跳过
+$toInstall   = @($toolList | Where-Object { $_.Selected -and -not $_.Installed })
+$alreadyOk   = @($toolList | Where-Object { $_.Installed })
+$userSkipped = @($toolList | Where-Object { -not $_.Selected -and -not $_.Installed })
+
+# 显示已安装工具
+if ($alreadyOk.Count -gt 0) {
+    Write-Host "`n  已安装（自动跳过）：" -ForegroundColor DarkGray
+    foreach ($t in $alreadyOk) {
+        Write-Host "    [OK] $($t.ScoopName)" -ForegroundColor DarkGray
+    }
+}
+
+# 显示用户跳过的工具
+if ($userSkipped.Count -gt 0) {
+    Write-Host "`n  用户跳过：" -ForegroundColor DarkYellow
+    foreach ($t in $userSkipped) {
+        Write-Host "    [--] $($t.ScoopName)" -ForegroundColor DarkYellow
+    }
+}
+
+# 安装选中且未安装的工具
+$successCount = 0
+$failCount = 0
+$skippedCount = 0
+$failedTools = [System.Collections.Generic.List[string]]::new()
+
+if ($toInstall.Count -gt 0) {
+    Write-Host "`n  即将安装 $($toInstall.Count) 个工具..." -ForegroundColor White
+
+    if ($pm -eq "scoop") {
+        # ── Scoop 安装 ──
+        foreach ($t in $toInstall) {
+            Write-Step "安装 $($t.ScoopName)..."
+            $out = scoop install $t.ScoopInstallArg 2>&1
+            $text = ($out | Out-String)
+            if ($text -match "already installed") {
+                Write-Ok "$($t.ScoopName)（已安装，跳过）"
+                $skippedCount++
+            } elseif ($text -match "ERROR") {
+                Write-Fail "$($t.ScoopName)"
+                $failCount++
+                $failedTools.Add($t.ScoopName)
+            } else {
+                Write-Ok "$($t.ScoopName)"
+                $successCount++
+            }
+        }
+    } else {
+        # ── winget 安装（仅安装有 WingetId 的工具） ──
+        foreach ($t in $toInstall) {
+            if ([string]::IsNullOrEmpty($t.WingetId)) { continue }
+            Write-Step "安装 $($t.ScoopName)..."
+            winget install $t.WingetId --exact --accept-source-agreements --accept-package-agreements --silent 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Ok "$($t.ScoopName)"
+                $successCount++
+            } else {
+                Write-Fail "$($t.ScoopName) (退出码 $LASTEXITCODE)"
+                $failCount++
+                $failedTools.Add($t.ScoopName)
+            }
+        }
+
+        # winget 缺失的工具 → 用 scoop 补装
+        $wingetMissing = @($toInstall | Where-Object { [string]::IsNullOrEmpty($_.WingetId) })
+        if ($wingetMissing.Count -gt 0) {
+            Write-Host ""
+            Write-Warn "winget 缺少：$($wingetMissing.ScoopName -join ', ')"
+            $answer = if ($Force) { "y" } else { (Read-Host "  用 Scoop 补装？[Y/n]").ToLower() }
+            if ($answer -ne "n") {
+                if (-not (Test-Command scoop)) {
+                    Write-Step "安装 Scoop 以补装缺失工具..."
+                    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+                    Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+                    Update-SessionPath
+                }
+                # 确保 extras bucket 可用（lazygit/jd 需要）
+                $bucketList = (scoop bucket list 2>$null) -join " "
+                if ($bucketList -notmatch "extras") {
+                    scoop bucket add extras 2>$null
+                }
+                foreach ($t in $wingetMissing) {
+                    Write-Step "安装 $($t.ScoopName) (scoop)..."
+                    $out = scoop install $t.ScoopInstallArg 2>&1
+                    $text = ($out | Out-String)
+                    if ($text -match "already installed") {
+                        Write-Ok "$($t.ScoopName)（已安装，跳过）"
+                        $skippedCount++
+                    } elseif ($text -match "ERROR") {
+                        Write-Fail "$($t.ScoopName)"
+                        $failCount++
+                        $failedTools.Add($t.ScoopName)
+                    } else {
+                        Write-Ok "$($t.ScoopName) (scoop)"
+                        $successCount++
+                    }
+                }
+            }
+        }
+    }
+} else {
+    Write-Host "`n  没有需要安装的工具" -ForegroundColor Green
+}
+
 Update-SessionPath
 
 $color = if ($failCount -gt 0) { "Yellow" } else { "Green" }
-Write-Host "`n  安装完成：成功 $successCount 个，失败 $failCount 个" -ForegroundColor $color
+Write-Host "`n  安装完成：新装 $successCount 个，已存在 $($alreadyOk.Count) 个，失败 $failCount 个" -ForegroundColor $color
 
 # ── 第三步：Starship 主题 ─────────────────────────────
 Write-Title "第三步：配置 Starship 主题"
@@ -572,11 +677,12 @@ Add-ProfileConfig $configLines
 # ── 完成 ───────────────────────────────────────────────
 Write-Title "全部完成"
 
+$totalOk = $successCount + $alreadyOk.Count
 Write-Host @"
 
   已完成：
     [1] Nerd Font (0xProto)     已安装 (per-user)
-    [2] CLI 工具                成功 $successCount / 17
+    [2] CLI 工具                新装 $successCount，已存在 $($alreadyOk.Count)，共 $totalOk / $($toolList.Count)
     [3] Starship 主题            已配置
     [4] PowerShell Profile       已配置
 
